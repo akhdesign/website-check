@@ -424,7 +424,7 @@
     yield { type: 'answer', engine: 'perplexity', label: 'Perplexity', question: q, mentioned: true, competitors: ['Gasthaus A', domain],
       text: `Gut bewertet sind Gasthaus A und ${domain}, das für saisonale Küche gelobt wird.\n\n(Beispielantwort im Demo-Modus)`, sources: [{ url: 'https://' + domain, title: '' }] };
     await sleep(600);
-    const all = [...checks, A('speed', 'Ladezeit & Handy', 'warn', 'Mobil 58/100 · LCP 3,4 s')];
+    const all = [...checks, A('speed', 'Ladezeit Handy & Desktop', 'warn', 'Handy 58 · Desktop 89 · LCP 3,4 s')];
     yield { type: 'speed', check: all.at(-1) };
     yield { type: 'score', score: 47, grade: 'Schwach sichtbar', checks: all };
     yield { type: 'done', id: 'demo', score: 47, grade: 'Schwach sichtbar', fixCount: 7, topFix: 'KI-Suche in der robots.txt erlauben' };
