@@ -1,4 +1,4 @@
-/* ah design · Website-Check · Frontend-Engine v2 (Lumos)
+/* ah design · Website-Check · Frontend-Engine v2.2 (Lumos)
    Markup und Styles liegen komplett in Webflow (Lumos-Klassen, Theme-Variablen).
    Dieses Script erzeugt kein HTML: alles, was dynamisch erscheint, wird aus den
    versteckten Templates in [data-wc="templates"] geklont. Zustände nur über .is-active.
@@ -85,6 +85,7 @@
     setStep(0);
     text(P.url, ''); clear(P.annos); clear(P.noteList); text(P.q, ''); clear(P.ans); clear(P.verdict);
     text(P.img, 'Inhalt'); text(P.mode, mode); text(P.status, 'Gleiche Frage auch an Perplexity');
+    gsap.set(P.wire, { clearProps: 'display' });
     gsap.set([P.stage, P.wire], { autoAlpha: 1, scale: 1 });
     gsap.set(P.notes, { autoAlpha: 0, y: 14 });
     gsap.set(P.answer, { autoAlpha: 0.3 });
@@ -137,6 +138,7 @@
       gsap.set(rows.map(x => x.r), { autoAlpha: 0 });
       const tl = gsap.timeline();
       tl.to(P.wire, { autoAlpha: 0, scale: 0.97, duration: D(0.4) });
+      tl.set(P.wire, { display: 'none' }); // kein leerer Platz unter den Notizen (v. a. am Handy)
       tl.to(P.notes, { autoAlpha: 1, y: 0, duration: D(0.4) }, '<0.15');
       rows.forEach(({ r, f, out }) => {
         tl.to(r, { autoAlpha: 1, duration: D(0.2) });
@@ -169,14 +171,17 @@
       if (c.pulse) c.pulse.kill();
       clear(P.ans);
       const words = tpl('words');
-      const wordT = words.querySelector('.check_answer_word'), chipT = words.querySelector('.check_answer_chip');
+      const wordT = words.querySelector('.check_answer_word:not(.is-punct)'), chipT = words.querySelector('.check_answer_chip');
+      const punctT = words.querySelector('.check_answer_word.is-punct') || wordT;
       const add = (t, str) => { const el = t.cloneNode(true); text(el, str); P.ans.appendChild(el); return el; };
       const comp = (ev.competitors || []).slice(0, 3);
       if (comp.length) {
         add(wordT, `${ev.label} empfiehlt`);
         comp.forEach((n, i) => {
           add(chipT, n);
-          add(wordT, i < comp.length - 2 ? ',' : i === comp.length - 2 ? 'und' : '.');
+          if (i < comp.length - 2) add(punctT, ',');
+          else if (i === comp.length - 2) add(wordT, 'und');
+          else add(punctT, '.');
         });
       } else {
         add(wordT, ev.text.length > 170 ? ev.text.slice(0, 170).replace(/\s+\S*$/, '') + ' …' : ev.text);
