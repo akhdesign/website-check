@@ -1,14 +1,12 @@
-/* ah design · Website-Check · Frontend-Engine v2.2 (Lumos)
-   Markup und Styles liegen komplett in Webflow (Lumos-Klassen, Theme-Variablen).
-   Dieses Script erzeugt kein HTML: alles, was dynamisch erscheint, wird aus den
-   versteckten Templates in [data-wc="templates"] geklont. Zustände nur über .is-active.
-   Nutzt das global geladene GSAP – lädt es nie selbst.
+/* ah design · Website-Check · Frontend-Engine v2.3 (Lumos)
    Hooks (Custom Attributes):
      [data-wc="check"]      Section-Wrapper (Root, alles darin)
      [data-wc="form"]       <form>, data-wc-api="https://…workers.dev" (oder "demo")
      [data-wc="input"]      URL-Feld · [data-wc="form-error"] Fehlertext
      [data-wc="result"]     leerer Container für das Ergebnis
-     [data-wc="templates"]  versteckte Vorlagen mit [data-tpl="…"] */
+     [data-wc="templates"]  versteckte Vorlagen mit [data-tpl="…"]
+     [data-wc="progress"]   Ladebalken (is-active = sichtbar) mit progress-bar / progress-status / progress-time
+     [data-wc="ready"]      fixe Pille „Ihr Ergebnis ist fertig ↓“ (is-active = sichtbar) */
 (function boot() {
   if (!window.gsap) {
     if (document.readyState !== 'complete') window.addEventListener('load', boot, { once: true });
@@ -258,7 +256,7 @@
       const chips = e.querySelector('.check_chips_list');
       if (a.competitors?.length) a.competitors.forEach(n => chips.appendChild(text(tpl('chip'), n)));
       else chips.remove();
-      const t = e.querySelector('.check_engine_text');
+      const t = e.querySelector('.check_engine_copy') || e.querySelector('.check_engine_text');
       text(t, a.text);
       const more = e.querySelector('.check_engine_more'), moreText = e.querySelector('.check_engine_more_text');
       more.addEventListener('click', () => {
@@ -289,10 +287,9 @@
     const o = { v: 0 };
     gsap.to(o, { v: done.score, duration: D(1.4), ease: 'power2.out', delay: D(0.3), onUpdate() { text(num, Math.round(o.v)); arc.style.strokeDashoffset = 213.6 * (1 - o.v / 100); } });
     gsap.from(r.children, { autoAlpha: 0, y: 20, duration: D(0.5), stagger: D(0.08), ease: 'power2.out' });
-    scrollTo(r);
 
     $('again', r).addEventListener('click', e => {
-      e.preventDefault(); input.value = ''; input.focus({ preventScroll: true }); scrollTo(root);
+      e.preventDefault(); leaveDoneMode(); hideReady(); input.value = ''; input.focus({ preventScroll: true }); scrollTo(root);
     });
 
     const rf = $('report', r), msg = $('r-msg', r), rb = rf.querySelector('[type="submit"]');
@@ -344,6 +341,80 @@
   }
   const tsToken = () => (tsId !== null && window.turnstile ? window.turnstile.getResponse(tsId) : undefined);
 
+  // ---------- Fortschritt: Balken, Countdown, Button-Text, Fertig-Pille ----------
+  const prog = $('progress'), progBar = $('progress-bar'), progStatus = $('progress-status'), progTime = $('progress-time');
+  const ready = $('ready') || document.querySelector('[data-wc="ready"]'); // Pille sitzt evtl. außerhalb der Section
+  const btnText = btn && (btn.closest('.button_main_wrap') || form).querySelector('.button_main_text');
+  const btnOrig = btnText ? [...btnText.childNodes].map(n => n.cloneNode(true)) : [];
+  const ESTIMATE = 50; // Sekunden, typische Dauer eines Live-Checks
+  const PHASE = {
+    start: [0.08, 'Lese Ihre Seite …'],
+    read: [0.3, 'KI versteht Ihre Seite …'],
+    understood: [0.42, 'Frage ChatGPT & Perplexity …'],
+    question: [0.45, 'Frage ChatGPT & Perplexity …'],
+    answer: [0.7, 'Messe Ladezeit …'],
+    speed: [0.92, 'Werte aus …'],
+    score: [0.96, 'Werte aus …'],
+  };
+  const P2 = { floor: 0, t0: 0, timer: null, scrolled: false, doneMode: false };
+  const setLabel = str => { if (!btnText) return; clear(btnText); btnText.textContent = str; };
+  const restoreLabel = () => { if (!btnText || !btnOrig.length) return; clear(btnText); btnOrig.forEach(n => btnText.appendChild(n.cloneNode(true))); };
+  const setBar = f => { if (progBar) gsap.to(progBar, { scaleX: Math.min(1, f), duration: D(0.6), ease: 'power2.out', overwrite: true }); };
+  const markScrolled = () => { P2.scrolled = true; };
+  const SCROLL_EVENTS = ['wheel', 'touchmove', 'keydown'];
+  function tick() {
+    const el = (Date.now() - P2.t0) / 1000, left = Math.round(ESTIMATE - el);
+    text(progTime, left > 3 ? `noch ca. ${left} s` : 'gleich fertig …');
+    setBar(Math.max(P2.floor, Math.min(0.9, el / (ESTIMATE + 8))));
+  }
+  function progressStart() {
+    hideReady();
+    P2.doneMode = false; P2.floor = 0; P2.t0 = Date.now(); P2.scrolled = false;
+    if (progBar) gsap.set(progBar, { scaleX: 0 });
+    text(progStatus, PHASE.start[1]); text(progTime, `noch ca. ${ESTIMATE} s`);
+    if (prog) prog.classList.add('is-active');
+    setLabel(PHASE.start[1]);
+    clearInterval(P2.timer); P2.timer = setInterval(tick, 1000);
+    // Erst nach dem Start-Scroll zählen, damit unser eigenes Scrollen nicht mitzählt
+    setTimeout(() => SCROLL_EVENTS.forEach(t => window.addEventListener(t, markScrolled, { passive: true })), 1200);
+  }
+  function progressEvent(ev) {
+    const ph = PHASE[ev.type];
+    if (!ph) return;
+    P2.floor = Math.max(P2.floor, ph[0]);
+    text(progStatus, ph[1]); setLabel(ph[1]); setBar(Math.max(P2.floor, Math.min(0.9, (Date.now() - P2.t0) / 1000 / (ESTIMATE + 8))));
+  }
+  function progressStop() {
+    clearInterval(P2.timer); P2.timer = null;
+    SCROLL_EVENTS.forEach(t => window.removeEventListener(t, markScrolled));
+  }
+  function progressFail() {
+    progressStop();
+    if (prog) prog.classList.remove('is-active');
+    restoreLabel();
+  }
+  const inView = el => { const b = el.getBoundingClientRect(); return b.top < window.innerHeight * 0.8 && b.bottom > 0; };
+  function hideReady() { if (ready) ready.classList.remove('is-active'); }
+  function goToResult() { hideReady(); const r = resultEl && resultEl.firstElementChild; if (r) scrollTo(r); }
+  function progressDone() {
+    progressStop();
+    setBar(1); text(progStatus, 'Fertig ✓'); text(progTime, '');
+    setLabel('Fertig ✓ Ergebnis ansehen ↓');
+    P2.doneMode = true;
+    const r = resultEl && resultEl.firstElementChild;
+    if (!r) return;
+    if (!P2.scrolled) setTimeout(goToResult, reduce ? 0 : 350);
+    else if (!inView(r) && ready) ready.classList.add('is-active');
+    setTimeout(() => { if (prog) prog.classList.remove('is-active'); }, reduce ? 0 : 2500);
+  }
+  function leaveDoneMode() { if (!P2.doneMode) return; P2.doneMode = false; restoreLabel(); }
+  if (ready) ready.addEventListener('click', e => { e.preventDefault(); goToResult(); });
+  // Pille ausblenden, sobald das Ergebnis selbst im Bild ist
+  window.addEventListener('scroll', () => {
+    if (ready && ready.classList.contains('is-active') && resultEl?.firstElementChild && inView(resultEl.firstElementChild)) hideReady();
+  }, { passive: true });
+  input && input.addEventListener('input', leaveDoneMode);
+
   // ---------- Echter Check ----------
   async function startCheck(raw) {
     interrupt();
@@ -352,21 +423,30 @@
     text(errEl, '');
     clear(resultEl);
     setBusy(btn, true);
-    let queue = Promise.resolve(), finished = false;
-    const push = ev => { if (ev.type === 'done' || ev.type === 'error') finished = true; queue = queue.then(() => my === run && handle(ev, c)); };
+    progressStart();
+    let queue = Promise.resolve(), finished = false, failed = false;
+    const push = ev => {
+      if (ev.type === 'done' || ev.type === 'error') finished = true;
+      if (ev.type === 'error') failed = true;
+      if (my === run) progressEvent(ev);
+      queue = queue.then(() => my === run && handle(ev, c));
+    };
     try {
-      for await (const ev of stream(raw, tsToken())) { if (my !== run) return; push(ev); }
+      for await (const ev of stream(raw, tsToken())) { if (my !== run) { progressStop(); return; } push(ev); }
       if (!finished) push({ type: 'error', message: 'Die Verbindung wurde unterbrochen. Bitte versuchen Sie es noch einmal.' });
     } catch (e) {
       if (!finished) push({ type: 'error', message: e.message || 'Der Check ist fehlgeschlagen.' });
     }
     await queue;
     setBusy(btn, false);
+    if (my !== run) return;
+    if (failed) progressFail(); else progressDone();
     if (tsId !== null && window.turnstile) window.turnstile.reset(tsId);
   }
 
   form && form.addEventListener('submit', e => {
     e.preventDefault(); e.stopPropagation();
+    if (P2.doneMode) { leaveDoneMode(); goToResult(); return; }
     const v = (input.value || '').trim();
     if (!v || !/\./.test(v)) { text(errEl, 'Bitte geben Sie eine Website-Adresse ein, z. B. ihre-firma.at'); input.focus(); return; }
     if (window.dataLayer) window.dataLayer.push({ event: 'website_check_start' });
