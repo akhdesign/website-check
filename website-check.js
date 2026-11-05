@@ -1,4 +1,7 @@
-/* ah design · Website-Check · Frontend-Engine v2.3 (Lumos)
+/* ah design · Website-Check · Frontend-Engine v2.4 (Lumos)
+   v2.4: Fix Mobile – Demo-Loop startete erst, wenn das Panel ins Bild scrollte, und brach dabei
+         den laufenden Live-Check ab. Außerdem: Fehler in einem Schritt blockieren nicht mehr alles,
+         und ein hängender Stream bricht nach 90 s mit Fehlermeldung ab.
    Hooks (Custom Attributes):
      [data-wc="check"]      Section-Wrapper (Root, alles darin)
      [data-wc="form"]       <form>, data-wc-api="https://…workers.dev" (oder "demo")
@@ -58,6 +61,7 @@
 
   // ---------- Laufsteuerung ----------
   let run = 0;
+  let liveStarted = false; // sobald ein echter Check läuft, startet der Demo-Loop nie mehr
   const live = new Set();
   const track = t => { live.add(t); return t; };
   function interrupt() { run++; live.forEach(t => t.kill()); live.clear(); }
@@ -316,13 +320,25 @@
   // ---------- Stream vom Worker ----------
   async function* stream(url, token) {
     if (API === 'demo') { yield* demoStream(url); return; }
-    const res = await fetch(API + '/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, turnstile: token }) });
-    if (!res.ok || !res.body) throw new Error((await res.json().catch(() => ({}))).error || 'Der Check konnte nicht gestartet werden.');
+    // Watchdog: kommt 90 s lang nichts vom Worker, wird abgebrochen statt ewig zu hängen
+    const ctrl = 'AbortController' in window ? new AbortController() : null;
+    let dog = null;
+    const feed = () => { clearTimeout(dog); dog = setTimeout(() => ctrl && ctrl.abort(), 90000); };
+    feed();
+    let res;
+    try {
+      res = await fetch(API + '/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, turnstile: token }), signal: ctrl ? ctrl.signal : undefined });
+    } catch (e) { clearTimeout(dog); throw new Error('Der Check konnte nicht gestartet werden. Bitte versuchen Sie es noch einmal.'); }
+    if (!res.ok || !res.body) { clearTimeout(dog); throw new Error((await res.json().catch(() => ({}))).error || 'Der Check konnte nicht gestartet werden.'); }
     const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = '';
     for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
+      let chunk;
+      try { chunk = await reader.read(); }
+      catch (e) { clearTimeout(dog); throw new Error('Die Verbindung wurde unterbrochen. Bitte versuchen Sie es noch einmal.'); }
+      const { value, done } = chunk;
+      if (done) { clearTimeout(dog); break; }
+      feed();
       buf += dec.decode(value, { stream: true });
       let i;
       while ((i = buf.indexOf('\n')) >= 0) {
@@ -417,6 +433,9 @@
 
   // ---------- Echter Check ----------
   async function startCheck(raw) {
+    liveStarted = true;
+    if (io) io.disconnect(); // Demo-Loop darf den Live-Check nicht mehr abbrechen (Mobile!)
+    initTurnstile();
     interrupt();
     const my = run;
     const c = { live: true, answers: [], warnings: [] };
@@ -429,7 +448,7 @@
       if (ev.type === 'done' || ev.type === 'error') finished = true;
       if (ev.type === 'error') failed = true;
       if (my === run) progressEvent(ev);
-      queue = queue.then(() => my === run && handle(ev, c));
+      queue = queue.then(() => my === run && handle(ev, c)).catch(err => console.error('[website-check]', ev.type, err));
     };
     try {
       for await (const ev of stream(raw, tsToken())) { if (my !== run) { progressStop(); return; } push(ev); }
@@ -518,7 +537,7 @@
   // Start: Demo-Loop, sobald das Panel sichtbar ist
   resetPanel('Beispiel');
   const io = 'IntersectionObserver' in window && new IntersectionObserver(es => {
-    if (es.some(e => e.isIntersecting)) { io.disconnect(); initTurnstile(); idle(); }
+    if (es.some(e => e.isIntersecting)) { io.disconnect(); initTurnstile(); if (!liveStarted) idle(); }
   }, { threshold: 0.25 });
   io ? io.observe(P.wire) : idle();
   window.addEventListener('load', initTurnstile);
