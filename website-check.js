@@ -1,4 +1,7 @@
-/* ah design · Website-Check · Frontend-Engine v2.4 (Lumos)
+/* ah design · Website-Check · Frontend-Engine v2.5 (Lumos)
+   v2.5: „Was die KI über Sie weiß“ blieb leer, wenn der Worker kein fields-Array schickt
+         (Fallback Unternehmen/Branche/Ort wird jetzt auch im Ergebnis angezeigt).
+         Ohne KI-Antworten erklärt die Zusammenfassung, dass die KI-Suche nicht lief.
    v2.4: Fix Mobile – Demo-Loop startete erst, wenn das Panel ins Bild scrollte, und brach dabei
          den laufenden Live-Check ab. Außerdem: Fehler in einem Schritt blockieren nicht mehr alles,
          und ein hängender Stream bricht nach 90 s mit Fehlermeldung ab.
@@ -128,6 +131,7 @@
       c.understood = u;
       const fields = u.fields && u.fields.length ? u.fields
         : [{ label: 'Unternehmen', value: u.name || null }, { label: 'Branche', value: u.branche || null }, { label: 'Ort', value: u.ort || null }];
+      c.fields = fields; // auch fürs Ergebnis merken (Worker schickt nicht immer u.fields)
       c.missing = fields.filter(f => !f.value).map(f => f.label);
       const rows = fields.map(f => {
         const r = tpl('note');
@@ -242,13 +246,14 @@
 
     text($('r-domain', r), `Ergebnis für ${c.domain}`);
     text($('r-grade', r), done.grade);
-    text($('r-summary', r), (c.answers.length ? `In ${mentioned} von ${c.answers.length} KI-Suchen werden Sie genannt. ` : '')
+    text($('r-summary', r), (c.answers.length ? `In ${mentioned} von ${c.answers.length} KI-Suchen werden Sie genannt. `
+      : 'Die KI-Suche (ChatGPT & Perplexity) konnte diesmal nicht durchgeführt werden – der Score bewertet nur die Technik. ')
       + `Ich habe ${done.fixCount} Verbesserung${done.fixCount === 1 ? '' : 'en'} gefunden, sortiert nach Wirkung.`);
 
     const checksEl = $('r-checks', r);
     (c.checks || []).forEach(x => checksEl.appendChild(listItem(x.status, x.label, x.detail, false)));
     const fieldsEl = $('r-fields', r);
-    (c.understood?.fields || []).forEach(f => fieldsEl.appendChild(listItem(f.value ? 'ok' : 'fail', f.label, f.value || 'nicht gefunden', !f.value)));
+    (c.fields || c.understood?.fields || []).forEach(f => fieldsEl.appendChild(listItem(f.value ? 'ok' : 'fail', f.label, f.value || 'nicht gefunden', !f.value)));
 
     const enginesWrap = $('r-engines-wrap', r), enginesEl = $('r-engines', r);
     if (!c.answers.length) enginesWrap.remove();
